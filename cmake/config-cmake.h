@@ -72,6 +72,9 @@
 /* Define to 1 if you have unix domain sockets */
 #cmakedefine HAVE_UNIX_DOMAIN_SOCKETS 1
 
+/* Define to 1 if you have TCP sockets needed by the GDB server */
+#cmakedefine HAVE_GDBSERVER 1
+
 /* Define to 1 if you have the 'gettimeofday' function. */
 #cmakedefine HAVE_GETTIMEOFDAY 1
 

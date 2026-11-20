@@ -110,6 +110,9 @@ Emulator improvements:
     by adding '\' to end of line to continue it
   - Increase max lenght of accepted debugger file commands to 4K
   - Add frame pointer based "backtrace" (bt) command
+  - GDB remote protocol server ("--gdbserver" and "--gdbserver-wait"
+    options, "gdbserver" debugger command), so that gdb can debug
+    the emulated CPU through the Hatari debugger
   - Add MMU translation support for the "memdump" command
 - Profiler:
   - Profiler skips "profile stats" output when entering debugger,

@@ -12,6 +12,7 @@ add_library(Debug OBJECT ${DSPDBG_C}
 	    console.c
 	    debugui.c
 	    debugInfo.c
+	    gdbserver.c
 	    log.c
 	    natfeats.c
 	    profile.c

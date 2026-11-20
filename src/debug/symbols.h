@@ -56,6 +56,8 @@ extern int Symbols_DspCodeCount(void);
 extern void Symbols_RemoveCurrentProgram(void);
 extern void Symbols_ChangeCurrentProgram(const char *path);
 extern void Symbols_ShowCurrentProgramPath(FILE *fp);
+extern const char *Symbols_GetCurrentProgramPath(void);
+extern const symbol_t *Symbols_GetCpuSymbols(int *count);
 extern void Symbols_AutoLoadCurrentProgram(const uint32_t *offsets, uint32_t maxaddr);
 extern void Symbols_LoadTOS(const char *path, uint32_t maxaddr);
 extern void Symbols_FreeAll(void);

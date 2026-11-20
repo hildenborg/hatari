@@ -975,6 +975,29 @@ void Symbols_ChangeCurrentProgram(const char *path)
 	}
 }
 
+/**
+ * Return path of the last program loaded through GEMDOS HD,
+ * or NULL if there is none.
+ */
+const char *Symbols_GetCurrentProgramPath(void)
+{
+	return CurrentProgramPath;
+}
+
+/**
+ * Return CPU symbols sorted by address, and set their count
+ * to *count.  Returns NULL (and count 0) if no symbols are loaded.
+ */
+const symbol_t *Symbols_GetCpuSymbols(int *count)
+{
+	if (!CpuSymbolsList) {
+		*count = 0;
+		return NULL;
+	}
+	*count = CpuSymbolsList->namecount;
+	return CpuSymbolsList->addresses;
+}
+
 /*
  * Show currently set program path
  */

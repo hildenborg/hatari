@@ -22,6 +22,9 @@ extern int BreakCond_DspBreakPointCount(void);
 extern bool BreakCond_Command(const char *expression, bool bForDsp);
 extern bool BreakAddr_Command(char *expression, bool bforDsp);
 
+/* for gdbserver.c */
+extern bool BreakCond_RemoveCpuExpression(const char *expression);
+
 /* extra functions exported for the test code */
 extern int BreakCond_MatchCpuExpression(int position, const char *expression);
 

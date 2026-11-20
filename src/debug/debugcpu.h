@@ -12,6 +12,7 @@
 
 extern void DebugCpu_Check(void);
 extern void DebugCpu_SetDebugging(void);
+extern void DebugCpu_SetStepCount(int steps);
 
 extern uint32_t DebugCpu_CallDepth(void);
 extern uint32_t DebugCpu_InstrCount(void);

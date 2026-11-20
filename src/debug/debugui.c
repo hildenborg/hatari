@@ -43,6 +43,7 @@ const char DebugUI_fileid[] = "Hatari debugui.c";
 #include "debugInfo.h"
 #include "debugui.h"
 #include "evaluate.h"
+#include "gdbserver.h"
 #include "history.h"
 #include "profile.h"
 #include "symbols.h"
@@ -515,6 +516,38 @@ static int DebugUI_CommandsFromFile(int argc, char *argv[])
 		DebugUI_ParseFile(argv[1], true, true);
 	else
 		DebugUI_PrintCmdHelp(argv[0]);
+	return DEBUGGER_CMDDONE;
+}
+
+
+/**
+ * Command: control GDB server
+ */
+static int DebugUI_GdbServer(int nArgc, char *psArgv[])
+{
+	const char *err = NULL;
+
+	if (nArgc < 2)
+	{
+		GdbServer_ShowStatus(stderr);
+		return DEBUGGER_CMDDONE;
+	}
+	if (strcmp(psArgv[1], "off") == 0)
+	{
+		GdbServer_Stop();
+	}
+	else if (strcmp(psArgv[1], "wait") == 0)
+	{
+		if (nArgc != 3 || (strcmp(psArgv[2], "on") && strcmp(psArgv[2], "off")))
+			return DebugUI_PrintCmdHelp(psArgv[0]);
+		GdbServer_SetWaitAtProgramStart(strcmp(psArgv[2], "on") == 0);
+	}
+	else
+	{
+		err = GdbServer_Start(psArgv[1]);
+	}
+	if (err)
+		fprintf(stderr, "ERROR: %s\n", err);
 	return DEBUGGER_CMDDONE;
 }
 
@@ -1092,6 +1125,16 @@ static const dbgcommand_t uicommand[] =
 	  "\tResult value is shown as binary, decimal and hexadecimal.\n"
 	  "\tAfter this, '$' will TAB-complete to last result value.",
 	  true },
+	{ DebugUI_GdbServer, NULL,
+	  "gdbserver", "",
+	  "control GDB remote protocol server",
+	  "[[host:]<port>|off|wait <on|off>]\n"
+	  "\tWithout arguments, show GDB server status. With a port number,\n"
+	  "\tlisten for gdb connections on it (localhost only, unless host\n"
+	  "\tis given, e.g. ':1234' for all interfaces). 'off' stops the\n"
+	  "\tserver. 'wait on' makes Hatari stop at the start of programs\n"
+	  "\tstarted from GEMDOS HD and wait for gdb when no gdb is connected.",
+	  false },
 	{ DebugUI_Help, DebugUI_MatchCommand,
 	  "help", "h",
 	  "print help",
@@ -1317,6 +1360,11 @@ void DebugUI(debug_reason_t reason)
 		recursing = false;
 		return;
 	}
+
+	/* report to gdb instead, if it is debugging the emulation */
+	if (GdbServer_DebugUI(reason))
+		return;
+
 	recursing = true;
 
 	History_Mark(reason);
@@ -1575,5 +1623,6 @@ void DebugUI_Exceptions(int nr, long pc)
 	if (!(ExceptionDebugMask & ex[nr].flag))
 		return;
 	fprintf(stderr,"%s exception at 0x%lx!\n", ex[nr].name, pc);
+	GdbServer_NoteException(nr + 2);
 	DebugUI(REASON_CPU_EXCEPTION);
 }

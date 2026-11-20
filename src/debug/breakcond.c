@@ -281,12 +281,15 @@ static uint32_t BreakCond_GetValue(const bc_value_t *bc_value)
 /**
  * Show & update rvalue for a tracked breakpoint condition to lvalue
  */
-static void BreakCond_UpdateTracked(bc_condition_t *condition, uint32_t value)
+static void BreakCond_UpdateTracked(bc_condition_t *condition, uint32_t value, bool quiet)
 {
 	uint32_t addr;
 
 	/* next monitor changes to this new value */
 	condition->rvalue.value.number = value;
+	if (quiet) {
+		return;
+	}
 
 	if (condition->lvalue.is_indirect &&
 	    condition->lvalue.valuetype == VALUE_TYPE_NUMBER) {
@@ -303,7 +306,7 @@ static void BreakCond_UpdateTracked(bc_condition_t *condition, uint32_t value)
 /**
  * Return true if all of the given breakpoint's conditions match
  */
-static bool BreakCond_MatchConditions(bc_condition_t *condition, int count)
+static bool BreakCond_MatchConditions(bc_condition_t *condition, int count, bool quiet)
 {
 	uint32_t lvalue, rvalue;
 	bool hit = false;
@@ -336,7 +339,7 @@ static bool BreakCond_MatchConditions(bc_condition_t *condition, int count)
 			return false;
 		}
 		if (condition->track) {
-			BreakCond_UpdateTracked(condition, lvalue);
+			BreakCond_UpdateTracked(condition, lvalue, quiet);
 		}
 	}
 	/* all conditions matched */
@@ -363,7 +366,7 @@ static bool BreakCond_MatchBreakPoints(bc_breakpoints_t *bps)
 	bp = bps->breakpoint;
 	for (i = 0; i < bps->count; bp++, i++) {
 
-		if (BreakCond_MatchConditions(bp->conditions, bp->ccount)) {
+		if (BreakCond_MatchConditions(bp->conditions, bp->ccount, bp->options.quiet)) {
 			bp->hits++;
 			if (bp->options.skip) {
 				if (bp->hits % bp->options.skip) {
@@ -1187,7 +1190,7 @@ static bc_breakpoints_t* BreakCond_GetListInfo(bool bForDsp)
  * On former case, mark it for tracking, on other cases, just
  * retrieve the value.
  */
-static void BreakCond_CheckTracking(bc_breakpoint_t *bp)
+static void BreakCond_CheckTracking(bc_breakpoint_t *bp, bool quiet)
 {
 	bc_condition_t *condition;
 	bool track = false;
@@ -1207,13 +1210,13 @@ static void BreakCond_CheckTracking(bc_breakpoint_t *bp)
 			if (condition->comparison != '=') {
 				condition->track = true;
 				track = true;
-			} else {
+			} else if (!quiet) {
 				fprintf(stderr, "\t%d. condition: %c $%x\n",
 					i+1, condition->comparison, value);
 			}
 		}
 	}
-	if (track) {
+	if (track && !quiet) {
 		fprintf(stderr, "-> Track value changes, show value(s) when matched.\n");
 	}
 }
@@ -1287,7 +1290,7 @@ static bool BreakCond_Parse(const char *expression, bc_options_t *options, bool 
 				fprintf(stderr, "-> On hit, print '%s'.\n", options->print);
 			}
 		}
-		BreakCond_CheckTracking(bp);
+		BreakCond_CheckTracking(bp, options->quiet);
 
 		bp->options.quiet = options->quiet;
 		bp->options.skip = options->skip;
@@ -1471,6 +1474,37 @@ static void BreakCond_DoDelayedActions(bc_breakpoints_t *bps)
 			ASSERT_VARIABLE(removed);
 		}
 	}
+}
+
+
+/**
+ * Remove first CPU breakpoint which has the given expression
+ * (compared in normalized form).  Used by the GDB server for
+ * the breakpoints it has added.
+ * Return true if breakpoint was found and removed.
+ */
+bool BreakCond_RemoveCpuExpression(const char *expression)
+{
+	parser_state_t pstate;
+	char *normalized;
+	bool ret = false;
+	int i;
+
+	normalized = BreakCond_TokenizeExpression(expression, &pstate);
+	if (pstate.argv) {
+		free(pstate.argv);
+	}
+	if (!normalized) {
+		return false;
+	}
+	for (i = 0; i < CpuBreakPoints.count; i++) {
+		if (strcmp(normalized, CpuBreakPoints.breakpoint[i].expression) == 0) {
+			ret = BreakCond_Remove(&CpuBreakPoints, i+1);
+			break;
+		}
+	}
+	free(normalized);
+	return ret;
 }
 
 

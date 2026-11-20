@@ -1297,6 +1297,17 @@ static int DebugCpu_Step(int nArgc, char *psArgv[])
 
 
 /**
+ * Set how many CPU instructions are executed before the debugger
+ * is invoked again (0 = no stepping).  Takes effect when
+ * DebugCpu_SetDebugging() is called next.
+ */
+void DebugCpu_SetStepCount(int steps)
+{
+	nCpuSteps = steps > 0 ? steps : 0;
+}
+
+
+/**
  * Readline match callback to list next command opcode types.
  * STATE = 0 -> different text from previous one.
  * Return next match or NULL if no matches.

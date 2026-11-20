@@ -67,6 +67,7 @@ const char Gemdos_fileid[] = "Hatari gemdos.c";
 #include "hatari-glue.h"
 #include "maccess.h"
 #include "symbols.h"
+#include "gdbserver.h"
 
 /* Maximum supported length of a GEMDOS path: */
 #define MAX_GEMDOS_PATH 256
@@ -3426,6 +3427,7 @@ static bool GemDOS_Pterm0(uint32_t Params)
 	LOG_TRACE(TRACE_OS_GEMDOS|TRACE_OS_BASE, "GEMDOS 0x00 Pterm0() at PC 0x%X\n",
 		  CallingPC);
 
+	GdbServer_ProgramExit(STMemory_ReadLong(act_pd), 0);
 	GemDOS_TerminateClose();
 	Symbols_RemoveCurrentProgram();
 
@@ -3447,6 +3449,7 @@ static bool GemDOS_Ptermres(uint32_t Params)
 	LOG_TRACE(TRACE_OS_GEMDOS|TRACE_OS_BASE, "GEMDOS 0x31 Ptermres(0x%X, %hd) at PC 0x%X\n",
 		  STMemory_ReadLong(Params), (int16_t)STMemory_ReadWord(Params+SIZE_WORD),
 		  CallingPC);
+	GdbServer_ProgramExit(STMemory_ReadLong(act_pd), (int16_t)STMemory_ReadWord(Params+SIZE_WORD));
 	GemDOS_TerminateClose();
 	return false;
 }
@@ -3462,6 +3465,7 @@ static bool GemDOS_Pterm(uint32_t Params)
 	LOG_TRACE(TRACE_OS_GEMDOS|TRACE_OS_BASE, "GEMDOS 0x4C Pterm(%hd) at PC 0x%X\n",
 		  nExitVal, CallingPC);
 
+	GdbServer_ProgramExit(STMemory_ReadLong(act_pd), (int16_t)nExitVal);
 	GemDOS_TerminateClose();
 	Symbols_RemoveCurrentProgram();
 
@@ -4600,6 +4604,9 @@ void GemDOS_PexecBpCreated(void)
 		{
 			Symbols_AutoLoadCurrentProgram(offsets, bssEnd);
 		}
+
+		/* let gdb stop at the program start, if it waits for that */
+		GdbServer_ProgramStart(sFileName, Regs[REG_D0]);
 
 		/* do user-configured program exec "event" actions */
 		Event_DoPrgExecActions();

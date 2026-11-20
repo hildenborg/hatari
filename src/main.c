@@ -14,6 +14,7 @@ const char Main_fileid[] = "Hatari main.c";
 #include "version.h"
 #include "configuration.h"
 #include "control.h"
+#include "gdbserver.h"
 #include "conv_st.h"
 #include "options.h"
 #include "dialog.h"
@@ -344,6 +345,7 @@ void Main_Init(int argc, char *argv[])
 void Main_UnInit(void)
 {
 	Control_RemoveFifo();
+	GdbServer_UnInit();
 
 	/* cleanly close the AVI file, if needed */
 	Avi_StopRecording_WithMsg();

@@ -1518,7 +1518,7 @@ Hatari emulation options, is following:</p>
 <h4>Caller information</h4>
 
 <p>
-With symbols loaded (see <a href="#Debug_symbols">Debug symbols</a>)
+With symbols loaded (see the "Debug symbols" section)
 before continuing emulation/profiling, additional caller information
 will be collected for all the code symbol addresses which are called
 as subroutines.  This information includes callstack, call counts,
@@ -2389,6 +2389,135 @@ post-processing</a> can provide execution callgraphs.
 Hint: for most of the above commands, one just needs to prefix them with
 "d" (or "dsp" when using full command names) to do similar operation on
 the DSP.
+</p>
+
+
+<h3 id="gdb">Debugging with gdb</h3>
+
+<p>
+Hatari includes a server for the gdb remote serial protocol, so that
+gdb (e.g. "gdb-multiarch", or an m68k cross-gdb) can debug the
+emulated CPU, with source level debugging for programs compiled with
+debug information.  gdb commands are passed to the Hatari debugger:
+gdb breakpoints and watchpoints are Hatari debugger conditional
+breakpoints (with the 'quiet' option), stepping uses the debugger
+stepping, and debugger invocations (Hatari breakpoints, exceptions,
+the debugger shortcut, NatFeats) are reported to gdb when it is
+connected.  The GDB server is available on Unix systems (Linux, macOS).
+</p>
+
+<p>
+Start the server with the "--gdbserver &lt;port&gt;" option, or the
+"gdbserver &lt;port&gt;" debugger command.  By default it accepts only
+local connections; use e.g. "--gdbserver :1234" to listen on all
+network interfaces.  Anybody who can connect to the port, can run
+any Hatari debugger commands, so do not expose it to untrusted networks.
+</p>
+
+<p>
+When gdb connects, emulation is stopped (like when attaching to a
+process) and emulation stays stopped until gdb continues it, the
+same way as with the console debugger.  While emulation runs, Ctrl-C
+in gdb stops it.  Detaching (or quitting) gdb lets the emulation
+continue.
+</p>
+
+<h4>Symbols</h4>
+
+<p>
+gdb can get program symbols in two ways:
+</p>
+<ul>
+<li>From the ELF file loaded to gdb (with "file &lt;elf&gt;", before
+connecting).  Hatari tells gdb (with the "qOffsets" packet) where the
+program executing from GEMDOS HD has been loaded, and gdb relocates
+the ELF symbols accordingly.  Both m68k-atari-elf (data addresses
+relative to TEXT section) and m68k-atari-mintelf (data addresses
+relative to DATA section) toolchain programs are supported.</li>
+<li>When no file is loaded to gdb, gdb reads an ELF file that Hatari
+generates from the Hatari debugger symbols of the current program
+(see the "Debug symbols" section), or from manually
+loaded symbols, e.g. TOS ones.  This gives gdb function and variable
+names, but not source line information.  In this case gdb shows
+"Reading /hatari/PROGRAM.PRG.elf from remote target...".</li>
+</ul>
+
+<h4>Starting programs</h4>
+
+<p>
+Programs started from GEMDOS HD act as the gdb "process":
+</p>
+<ul>
+<li>With the "--gdbserver-wait on" option (or "gdbserver wait on"
+command), when a program is started and no gdb is connected yet,
+Hatari stops at the program's first instruction and waits for gdb
+to connect.  Hatari window is unresponsive while waiting.  This is
+the easiest way to debug a program from its start, e.g. one which
+Hatari autostarts.</li>
+<li>In "extended-remote" mode, gdb "run" (and "start", "starti")
+commands wait until the given program ("set remote exec-file
+&lt;name&gt;") is started in the emulation, e.g. from the desktop,
+and stop at its first instruction.  Without a program name, any
+program started from GEMDOS HD is used.  gdb gets the program's new
+load address after this, so it does not matter where the program
+gets loaded.  Waiting is limited by the gdb "remotetimeout" setting,
+but gdb accepts a late reply after giving a warning.</li>
+<li>When such a program exits, gdb is told the program exit code.
+gdb "kill" does not terminate the program, it detaches gdb from it.</li>
+</ul>
+
+<h4>Monitor commands</h4>
+
+<p>
+gdb "monitor &lt;command&gt;" runs the given Hatari debugger command
+and shows its output in gdb, e.g. "monitor info basepage",
+"monitor r" or "monitor b pc = TEXT :once".
+</p>
+
+<h4>Example</h4>
+
+<p>
+Hatari autostarting a program, and waiting for gdb at its start:
+</p>
+<pre>
+$ hatari --gdbserver 1234 --gdbserver-wait on hd/hello.prg
+</pre>
+<p>
+gdb using the corresponding ELF file:
+</p>
+<pre>
+$ gdb-multiarch hello
+(gdb) target extended-remote localhost:1234
+(gdb) break main
+(gdb) continue
+(gdb) next
+(gdb) watch counter
+(gdb) continue
+(gdb) monitor info basepage
+</pre>
+<p>
+Debugging a program started later from the desktop:
+</p>
+<pre>
+(gdb) set remotetimeout 30
+(gdb) target extended-remote localhost:1234
+(gdb) detach
+(gdb) set remote exec-file HELLO.PRG
+(gdb) break main
+(gdb) run
+</pre>
+
+<p>
+Supported are software and hardware breakpoints (both are the same),
+write watchpoints of up to 16 bytes (they detect value changes, like
+Hatari tracking breakpoints), single and range stepping, CPU and FPU
+registers, memory access and Ctrl-C.  Read and access watchpoints
+are not supported.  While gdb is attached, bus error, address error,
+illegal instruction, division by zero, TRAPV and privilege violation
+exceptions are reported to gdb (in addition to the exceptions enabled
+with "--debug-except").  Memory accesses use physical addresses, MMU
+translation is not done.  DSP is not supported, DSP breakpoints invoke
+the console debugger.
 </p>
 
 

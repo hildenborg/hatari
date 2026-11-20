@@ -28,6 +28,7 @@ const char Options_fileid[] = "Hatari options.c";
 #include "control.h"
 #include "debugui.h"
 #include "event.h"
+#include "gdbserver.h"
 #include "file.h"
 #include "floppy.h"
 #include "floppies/ipf.h"
@@ -231,6 +232,8 @@ typedef enum {
 	OPT_SAVECONFIG,
 	OPT_CONTROLSOCKET,
 	OPT_CMDFIFO,
+	OPT_GDBSERVER,
+	OPT_GDBSERVER_WAIT,
 	OPT_LOGFILE,
 	OPT_LOGLEVEL,
 	OPT_ALERTLEVEL,
@@ -561,6 +564,12 @@ static const opt_t HatariOptions[] = {
 	  "<file>", "Hatari connects to given socket for commands" },
 	{ OPT_CMDFIFO, NULL, "--cmd-fifo",
 	  "<file>", "Hatari creates & reads commands from given fifo" },
+#endif
+#if HAVE_GDBSERVER
+	{ OPT_GDBSERVER, NULL, "--gdbserver",
+	  "<[host:]port>", "Listen for gdb connections on given TCP port (0=off)" },
+	{ OPT_GDBSERVER_WAIT, NULL, "--gdbserver-wait",
+	  "<bool>", "Wait for gdb at the start of GEMDOS HD programs" },
 #endif
 	{ OPT_LOGFILE, NULL, "--log-file",
 	  "<file>", "Save log output to <file> (default=stderr)" },
@@ -2424,6 +2433,25 @@ bool Opt_ParseParameters(int argc, const char * const argv[], int *exitval)
 				return Opt_ShowError(OPT_CMDFIFO, arg, errstr);
 			}
 			break;
+
+		case OPT_GDBSERVER:
+			errstr = GdbServer_Start(arg);
+			if (errstr)
+			{
+				return Opt_ShowError(OPT_GDBSERVER, arg, errstr);
+			}
+			break;
+
+		case OPT_GDBSERVER_WAIT:
+		{
+			bool wait;
+			ok = Opt_Bool(arg, OPT_GDBSERVER_WAIT, &wait);
+			if (ok)
+			{
+				GdbServer_SetWaitAtProgramStart(wait);
+			}
+			break;
+		}
 
 		case OPT_LOGFILE:
 			ok = Opt_StrCpy(OPT_LOGFILE, CHECK_NONE, ConfigureParams.Log.sLogFileName,

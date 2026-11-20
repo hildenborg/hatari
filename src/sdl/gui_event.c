@@ -16,6 +16,7 @@
 
 #include "configuration.h"
 #include "control.h"
+#include "gdbserver.h"
 #include "conv_st.h"
 #include "gui_event.h"
 #include "ikbd.h"
@@ -133,6 +134,9 @@ void GuiEvent_EventHandler(void)
 		/* check remote process control */
 		remotepause = Control_CheckUpdates();
 
+		/* check for gdb connections / interrupt requests */
+		GdbServer_Poll();
+
 		if ( bEmulationActive || remotepause )
 		{
 			events = SDL_PollEvent(&event);
@@ -143,7 +147,11 @@ void GuiEvent_EventHandler(void)
 			/* last (shortcut) event activated emulation? */
 			if ( bEmulationActive )
 				break;
-			events = SDL_WaitEvent(&event);
+			/* wake up regularly for gdb also when paused */
+			if (GdbServer_IsListening())
+				events = SDL_WaitEventTimeout(&event, 50);
+			else
+				events = SDL_WaitEvent(&event);
 		}
 		if (!events)
 		{

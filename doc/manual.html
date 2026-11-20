@@ -1198,6 +1198,17 @@ Hatari creates the indicated FIFO file and reads commands from it.
 Commands can be echoed to FIFO file, and are same as with the control
 socket. Hatari outputs help for unrecognized commands and subcommands
 </p>
+<p class="parameter">--gdbserver &lt;[host:]port&gt;</p>
+<p class="paramdesc">
+Listen for gdb remote protocol connections on given TCP port (0=off).
+Only local connections are accepted, unless a host (or just ':' for all
+interfaces) is given.  See the debugger documentation for details
+</p>
+<p class="parameter">--gdbserver-wait &lt;bool&gt;</p>
+<p class="paramdesc">
+When no gdb is connected, stop at the first instruction of programs
+started from GEMDOS HD, and wait until gdb connects
+</p>
 <p class="parameter">--log-file
 &lt;file&gt;</p>
 <p class="paramdesc">Save log output to &lt;file&gt;
