@@ -10473,9 +10473,14 @@ static bool read_dcache030_2(uaecptr addr, uae_u32 size, uae_u32 *valp)
 static uae_u32 read_dcache030 (uaecptr addr, uae_u32 size, uae_u32 fc)
 {
 	uae_u32 val;
+	bool cached;
 	regs.fc030 = fc;
 
-	if (!read_dcache030_2(addr, size, &val)) {
+	// Hatari: report the operand access to the debugger, not cache line reads
+	dbgwatch_suspend++;
+	cached = read_dcache030_2(addr, size, &val);
+	dbgwatch_suspend--;
+	if (!cached) {
 		// read from memory, data cache is disabled or inhibited.
 		if (size == 2)
 			return dcache_lget(addr);
@@ -10484,6 +10489,7 @@ static uae_u32 read_dcache030 (uaecptr addr, uae_u32 size, uae_u32 fc)
 		else
 			return dcache_bget(addr);
 	}
+	dbgwatch_access(addr, 1 << size, false);
 	return val;
 }
 

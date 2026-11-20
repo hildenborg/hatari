@@ -729,7 +729,11 @@ uint16_t	STMemory_DMA_ReadWord ( uint32_t addr )
 	if ( STMemory_CheckAddrBusError ( addr ) )
 		value = DMA_READ_WORD_BUS_ERR;
 	else
+	{
+		dbgwatch_suspend++;	/* not a CPU access */
 		value = (uint16_t)get_word ( addr );
+		dbgwatch_suspend--;
+	}
 //fprintf ( stderr , "readw %x %x %x\n" , addr , value , STMemory_CheckAddrBusError(addr) );
 	return value;
 }
@@ -740,7 +744,11 @@ void	STMemory_DMA_WriteWord ( uint32_t addr , uint16_t value )
 	/* Call put_word only if the address doesn't point to a bus error region */
 	/* (also see SysMem_wput for addr < 0x8) */
 	if ( STMemory_CheckAddrBusError ( addr ) == false )
+	{
+		dbgwatch_suspend++;	/* not a CPU access */
 		put_word ( addr , (uint32_t)(value) );
+		dbgwatch_suspend--;
+	}
 //fprintf ( stderr , "writew %x %x %x\n" , addr , value , STMemory_CheckAddrBusError(addr) );
 }
 
@@ -753,7 +761,11 @@ uint8_t	STMemory_DMA_ReadByte ( uint32_t addr )
 	if ( STMemory_CheckAddrBusError ( addr ) )
 		value = DMA_READ_BYTE_BUS_ERR;
 	else
+	{
+		dbgwatch_suspend++;	/* not a CPU access */
 		value = (uint8_t)get_byte ( addr );
+		dbgwatch_suspend--;
+	}
 //fprintf ( stderr , "readb %x %x %x\n" , addr , value , STMemory_CheckAddrBusError(addr) );
 	return value;
 }
@@ -764,7 +776,11 @@ void	STMemory_DMA_WriteByte ( uint32_t addr , uint8_t value )
 	/* Call put_word only if the address doesn't point to a bus error region */
 	/* (also see SysMem_wput for addr < 0x8) */
 	if ( STMemory_CheckAddrBusError ( addr ) == false )
+	{
+		dbgwatch_suspend++;	/* not a CPU access */
 		put_byte ( addr , (uint32_t)(value) );
+		dbgwatch_suspend--;
+	}
 //fprintf ( stderr , "writeb %x %x %x\n" , addr , value , STMemory_CheckAddrBusError(addr) );
 }
 

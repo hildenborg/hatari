@@ -1457,6 +1457,7 @@ uae_u32	mem_access_delay_word_read_megaste_16 (uaecptr addr)
 			if ( MegaSTE_Cache_Read ( addr , 2 , &v ) )
 			{
 				x_do_cycles_post (4 * cpucycleunit, v);
+				dbgwatch_access ( addr , 2 , false );
 				CpuInstruction.D_Cache_hit++;
 			}
 			else
@@ -1479,6 +1480,7 @@ uae_u32	mem_access_delay_word_read_megaste_16 (uaecptr addr)
 			if ( MegaSTE_Cache_Read ( addr , 2 , &v ) )
 			{
 				x_do_cycles_post (4 * cpucycleunit, v);
+				dbgwatch_access ( addr , 2 , false );
 				CpuInstruction.D_Cache_hit++;
 			}
 			else
@@ -1579,6 +1581,7 @@ uae_u32	mem_access_delay_byte_read_megaste_16 (uaecptr addr)
 			if ( MegaSTE_Cache_Read ( addr , 1 , &v ) )
 			{
 				x_do_cycles_post (4 * cpucycleunit, v);
+				dbgwatch_access ( addr , 1 , false );
 				CpuInstruction.D_Cache_hit++;
 			}
 			else
@@ -1588,7 +1591,14 @@ uae_u32	mem_access_delay_byte_read_megaste_16 (uaecptr addr)
 				/* Reading with get_word() could create a bus error, so we must first */
 				/* check if this address can be cached without bus error */
 				if ( MegaSTE_Cache_Addr_Cacheable ( addr & ~1 , 2 , 0 ) )
-					MegaSTE_Cache_Update ( addr , 2 , get_word(addr & ~1) , 0 );
+				{
+					uint16_t w;
+					/* cache line fill is not a CPU access for the debugger */
+					dbgwatch_suspend++;
+					w = get_word(addr & ~1);
+					dbgwatch_suspend--;
+					MegaSTE_Cache_Update ( addr , 2 , w , 0 );
+				}
 
 				CpuInstruction.D_Cache_miss++;
 			}
@@ -1606,6 +1616,7 @@ uae_u32	mem_access_delay_byte_read_megaste_16 (uaecptr addr)
 			if ( MegaSTE_Cache_Read ( addr , 1 , &v ) )
 			{
 				x_do_cycles_post (4 * cpucycleunit, v);
+				dbgwatch_access ( addr , 1 , false );
 				CpuInstruction.D_Cache_hit++;
 			}
 			else

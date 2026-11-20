@@ -130,7 +130,7 @@ static void SockExit(void)
 
 /* Max packet size accepted from gdb (advertised as hex in qSupported) */
 #define GDB_PACKET_SIZE 0x4000
-/* Max watchpoint length in bytes */
+/* Max write watchpoint length in bytes (value is compared after each instruction) */
 #define GDB_WATCH_MAX 16
 /* File descriptor number given to gdb for the generated ELF file */
 #define GDB_ELF_FD 3
@@ -159,20 +159,24 @@ typedef enum {
 	STOP_SIGNAL,
 	STOP_SWBREAK,
 	STOP_HWBREAK,
-	STOP_WATCH
+	STOP_WATCH,
+	STOP_RWATCH,
+	STOP_AWATCH
 } stop_kind_t;
 
 typedef enum {
 	BP_SW = 0,
 	BP_HW = 1,
-	BP_WATCH = 2
+	BP_WATCH = 2,	/* write watchpoint */
+	BP_READ = 3,	/* read watchpoint */
+	BP_ACCESS = 4	/* access (read or write) watchpoint */
 } bp_type_t;
 
 typedef struct {
 	bp_type_t type;
 	uint32_t addr;
 	uint32_t len;
-	uint8_t value[GDB_WATCH_MAX];	/* last seen watched memory */
+	uint8_t value[GDB_WATCH_MAX];	/* last seen watched memory (BP_WATCH) */
 } gdb_bp_t;
 
 typedef struct {
@@ -213,6 +217,9 @@ static bool waitAtStart;	/* --gdbserver-wait */
 static int lastSignal = GDB_SIGTRAP;
 static stop_kind_t stopKind;
 static uint32_t stopWatchAddr;
+static bool watchHit;		/* read / access watchpoint was hit */
+static stop_kind_t watchHitKind;
+static uint32_t watchHitAddr;
 static uint32_t rangeStart, rangeEnd;	/* vCont;r range */
 static unsigned rangeSteps;
 static int pendingException;
@@ -721,6 +728,11 @@ static void BreakExpression(char *buf, size_t size, bp_type_t type, uint32_t add
 	}
 }
 
+static bool IsAccessWatch(bp_type_t type)
+{
+	return type == BP_READ || type == BP_ACCESS;
+}
+
 /* Watched region is split to long / word / byte sized conditions */
 static int WatchChunk(uint32_t remaining)
 {
@@ -732,6 +744,8 @@ static void RemoveHatariBreaks(const gdb_bp_t *bp)
 	char expr[64];
 	uint32_t off = 0;
 
+	if (IsAccessWatch(bp->type))
+		return;		/* uses CPU core access watch instead */
 	if (bp->type != BP_WATCH) {
 		BreakExpression(expr, sizeof(expr), bp->type, bp->addr, 0);
 		BreakCond_RemoveCpuExpression(expr);
@@ -743,6 +757,68 @@ static void RemoveHatariBreaks(const gdb_bp_t *bp)
 		BreakCond_RemoveCpuExpression(expr);
 		off += width;
 	}
+}
+
+/**
+ * Called by the CPU core on a data access within the watched range.
+ * Records the first matching read / access watchpoint hit, and makes
+ * the debugger stop after the current instruction.
+ */
+static void WatchHook(uaecptr addr, int size, bool write)
+{
+	int i;
+
+	if (watchHit || !attached || stopped)
+		return;
+	for (i = 0; i < bpCount; i++) {
+		const gdb_bp_t *bp = &bps[i];
+		if (!IsAccessWatch(bp->type) || (write && bp->type == BP_READ))
+			continue;
+		if (addr >= bp->addr + bp->len || addr + size <= bp->addr)
+			continue;
+		watchHit = true;
+		watchHitKind = (bp->type == BP_READ) ? STOP_RWATCH : STOP_AWATCH;
+		watchHitAddr = addr > bp->addr ? addr : bp->addr;
+		DebugCpu_SetStepCount(1);
+		M68000_SetDebugger(true);
+		return;
+	}
+}
+
+/**
+ * Update CPU core access watch range from the read / access watchpoints.
+ */
+static void UpdateAccessWatch(void)
+{
+	uint32_t start = UINT32_MAX, end = 0;
+	int i;
+
+	for (i = 0; i < bpCount; i++) {
+		if (!IsAccessWatch(bps[i].type))
+			continue;
+		if (bps[i].addr < start)
+			start = bps[i].addr;
+		if (bps[i].addr + bps[i].len > end)
+			end = bps[i].addr + bps[i].len;
+	}
+	if (end) {
+		dbgwatch_start = start;
+		dbgwatch_end = end;
+		dbgwatch_func = WatchHook;
+	} else {
+		dbgwatch_func = NULL;
+	}
+}
+
+/**
+ * Clear the read / access watchpoint hit state when emulation stops
+ * or resumes.
+ */
+static void ClearAccessWatchHit(void)
+{
+	watchHit = false;
+	/* in case a CPU exception jumped out of a suspended access */
+	dbgwatch_suspend = 0;
 }
 
 static void ReadWatchValue(gdb_bp_t *bp, uint8_t *dst)
@@ -757,7 +833,7 @@ static int FindBreak(bp_type_t type, uint32_t addr, uint32_t len)
 	int i;
 	for (i = 0; i < bpCount; i++) {
 		if (bps[i].type == type && bps[i].addr == addr &&
-		    (type != BP_WATCH || bps[i].len == len))
+		    (type < BP_WATCH || bps[i].len == len))
 			return i;
 	}
 	return -1;
@@ -773,6 +849,8 @@ static bool InsertBreak(bp_type_t type, uint32_t addr, uint32_t len)
 		return true;
 	if (type == BP_WATCH && (len == 0 || len > GDB_WATCH_MAX))
 		return false;
+	if (IsAccessWatch(type) && (len == 0 || addr + len < addr))
+		return false;
 
 	if (bpCount >= bpAlloc) {
 		bpAlloc = bpAlloc ? bpAlloc * 2 : 16;
@@ -786,9 +864,13 @@ static bool InsertBreak(bp_type_t type, uint32_t addr, uint32_t len)
 	memset(bp, 0, sizeof(*bp));
 	bp->type = type;
 	bp->addr = addr;
-	bp->len = (type == BP_WATCH) ? len : 0;
+	bp->len = (type >= BP_WATCH) ? len : 0;
 
-	if (type != BP_WATCH) {
+	if (IsAccessWatch(type)) {
+		bpCount++;
+		UpdateAccessWatch();
+		return true;
+	} else if (type != BP_WATCH) {
 		BreakExpression(expr, sizeof(expr), type, addr, 0);
 		if (!AddHatariBreak(expr))
 			return false;
@@ -817,6 +899,7 @@ static bool RemoveBreak(bp_type_t type, uint32_t addr, uint32_t len)
 		return false;
 	RemoveHatariBreaks(&bps[i]);
 	bps[i] = bps[--bpCount];
+	UpdateAccessWatch();
 	return true;
 }
 
@@ -824,6 +907,8 @@ static void RemoveAllBreaks(void)
 {
 	while (bpCount > 0)
 		RemoveHatariBreaks(&bps[--bpCount]);
+	UpdateAccessWatch();
+	ClearAccessWatchHit();
 }
 
 static void RemoveStartBreak(void)
@@ -1183,6 +1268,12 @@ static void OutStopReply(void)
 		break;
 	case STOP_WATCH:
 		OutPrintf("watch:%x;", stopWatchAddr);
+		break;
+	case STOP_RWATCH:
+		OutPrintf("rwatch:%x;", stopWatchAddr);
+		break;
+	case STOP_AWATCH:
+		OutPrintf("awatch:%x;", stopWatchAddr);
 		break;
 	default:
 		break;
@@ -1741,6 +1832,7 @@ static gdb_action_t Resume(bool step, uint32_t start, uint32_t end)
 	rangeEnd = step ? end : 0;
 	rangeSteps = 0;
 	DebugCpu_SetStepCount(step ? 1 : 0);
+	ClearAccessWatchHit();
 	stopReplyPending = true;
 	return ACT_RESUME;
 }
@@ -1829,8 +1921,8 @@ static gdb_action_t CmdBreakpoint(bool insert)
 		OutError(1);
 		return ACT_NONE;
 	}
-	if (type > BP_WATCH)
-		return ACT_NONE;	/* read & access watchpoints are unsupported */
+	if (type > BP_ACCESS)
+		return ACT_NONE;	/* unsupported breakpoint type */
 
 	if (insert)
 		ok = InsertBreak(type, addr, len);
@@ -1971,6 +2063,7 @@ static void StopLoop(int signal, bool reply)
 	waitForProgram = false;
 	rangeStart = rangeEnd = 0;
 	DebugCpu_SetStepCount(0);
+	ClearAccessWatchHit();
 
 	Symbols_AutoLoadCurrentProgram(NULL, 0);
 	UpdateWatchValues();
@@ -2036,7 +2129,21 @@ bool GdbServer_DebugUI(debug_reason_t reason)
 	pc = M68000_GetPC();
 	stopKind = STOP_SIGNAL;
 
+	if (watchHit && (reason == REASON_CPU_STEPS || reason == REASON_CPU_BREAKPOINT)) {
+		/* read / access watchpoint, stop after the accessing instruction */
+		if (startBreak && pc == startBreak)
+			RemoveStartBreak();
+		/* update write watch values too */
+		ClassifyBreak(pc);
+		stopKind = watchHitKind;
+		stopWatchAddr = watchHitAddr;
+		signal = GDB_SIGTRAP;
+		reason = REASON_NONE;
+	}
+
 	switch (reason) {
+	case REASON_NONE:
+		break;
 	case REASON_CPU_STEPS:
 		if (rangeEnd && pc >= rangeStart && pc < rangeEnd) {
 			/* range stepping, check for interrupt now and then */
@@ -2168,29 +2275,90 @@ bool GdbServer_IsListening(void)
  * Called when a program has been loaded through GEMDOS HD and is
  * about to be started.
  */
-void GdbServer_ProgramStart(const char *path, uint32_t basepage)
+/**
+ * Set breakpoint at the first instruction of a starting program.
+ * Return false if that failed.
+ */
+static bool SetStartBreak(uint32_t addr)
 {
 	char expr[64];
 
+	RemoveStartBreak();
+	BreakExpression(expr, sizeof(expr), BP_SW, addr, 0);
+	if (!AddHatariBreak(expr))
+		return false;
+	startBreak = addr;
+	return true;
+}
+
+/**
+ * Send text to gdb console, while gdb waits for a stop reply.
+ */
+static void OutConsole(const char *text)
+{
+	OutClear();
+	OutStr("O");
+	OutHexBytes((const uint8_t *)text, strlen(text));
+	SendPacket();
+}
+
+/**
+ * With --gdbserver-wait, stop also at the start of a program that gdb
+ * did not wait for with 'run'.  gdb was connected before the program
+ * was loaded, so it has fetched its symbol offsets (qOffsets) already,
+ * and needs to be told how to relocate the program symbols.
+ */
+static void StopAtEarlyProgramStart(const char *path, uint32_t basepage)
+{
+	prog_info_t info;
+	uint32_t textoff, dataoff;
+	char msg[FILENAME_MAX + 256];
+
+	if (!ReadProgramInfo(basepage, path, &info) || !SetStartBreak(info.text))
+		return;
+	GetSectionOffsets(&info, &textoff, &dataoff);
+	if (textoff == dataoff) {
+		snprintf(msg, sizeof(msg),
+			 "program '%s' started after gdb connected, its symbols are not relocated.\n"
+			 "Load them with: symbol-file -o 0x%x <ELF file>\n",
+			 path, textoff);
+	} else {
+		snprintf(msg, sizeof(msg),
+			 "program '%s' started after gdb connected, its symbols are not relocated.\n"
+			 "Relocate them with text offset 0x%x and data offset 0x%x.\n",
+			 path, textoff, dataoff);
+	}
+	fputs("GDB server: ", stderr);
+	fputs(msg, stderr);
+	OutConsole(msg);
+	DebugCpu_SetDebugging();
+}
+
+void GdbServer_ProgramStart(const char *path, uint32_t basepage)
+{
+	prog_info_t info;
+
 	if (listenFd == SOCK_NONE || stopped)
 		return;
+	if (clientFd != SOCK_NONE && !waitForProgram) {
+		/* gdb connected before the program started */
+		if (waitAtStart && attached && stopReplyPending)
+			StopAtEarlyProgramStart(path, basepage);
+		return;
+	}
 	if (clientFd != SOCK_NONE) {
-		if (!waitForProgram || !ProgramNameMatches(path, waitProgramName))
+		if (!ProgramNameMatches(path, waitProgramName))
 			return;
 	} else if (!waitAtStart) {
 		return;
 	}
-	if (!ReadProgramInfo(basepage, path, &prog))
+	if (!ReadProgramInfo(basepage, path, &info))
 		return;
 
 	/* stop at the first program instruction */
-	RemoveStartBreak();
-	BreakExpression(expr, sizeof(expr), BP_SW, prog.text, 0);
-	if (!AddHatariBreak(expr)) {
-		prog.valid = false;
+	if (!SetStartBreak(info.text))
 		return;
-	}
-	startBreak = prog.text;
+	prog = info;
 
 	if (clientFd == SOCK_NONE) {
 		fprintf(stderr, "GDB server: program '%s' started, waiting for gdb to connect to %s...\n",

@@ -2399,11 +2399,12 @@ Hatari includes a server for the gdb remote serial protocol, so that
 gdb (e.g. "gdb-multiarch", or an m68k cross-gdb) can debug the
 emulated CPU, with source level debugging for programs compiled with
 debug information.  gdb commands are passed to the Hatari debugger:
-gdb breakpoints and watchpoints are Hatari debugger conditional
+gdb breakpoints and write watchpoints are Hatari debugger conditional
 breakpoints (with the 'quiet' option), stepping uses the debugger
 stepping, and debugger invocations (Hatari breakpoints, exceptions,
 the debugger shortcut, NatFeats) are reported to gdb when it is
-connected.  The GDB server is available on Unix systems (Linux, macOS).
+connected.  The GDB server is available on Unix systems (Linux, macOS)
+and Windows.
 </p>
 
 <p>
@@ -2453,7 +2454,12 @@ command), when a program is started and no gdb is connected yet,
 Hatari stops at the program's first instruction and waits for gdb
 to connect.  Hatari window is unresponsive while waiting.  This is
 the easiest way to debug a program from its start, e.g. one which
-Hatari autostarts.</li>
+Hatari autostarts.  If gdb is already connected and has continued
+the emulation (not waiting for a program with "run"), Hatari stops
+at the program's first instruction too.  However, gdb got the symbol
+offsets when it connected, before the program was loaded, so gdb's
+symbols for it are not relocated.  Hatari tells in gdb console how
+to fix that, e.g. "symbol-file -o 0x18a38 hello.elf".</li>
 <li>In "extended-remote" mode, gdb "run" (and "start", "starti")
 commands wait until the given program ("set remote exec-file
 &lt;name&gt;") is started in the emulation, e.g. from the desktop,
@@ -2492,6 +2498,7 @@ $ gdb-multiarch hello
 (gdb) continue
 (gdb) next
 (gdb) watch counter
+(gdb) rwatch flags
 (gdb) continue
 (gdb) monitor info basepage
 </pre>
@@ -2510,9 +2517,13 @@ Debugging a program started later from the desktop:
 <p>
 Supported are software and hardware breakpoints (both are the same),
 write watchpoints of up to 16 bytes (they detect value changes, like
-Hatari tracking breakpoints), single and range stepping, CPU and FPU
-registers, memory access and Ctrl-C.  Read and access watchpoints
-are not supported.  While gdb is attached, bus error, address error,
+Hatari tracking breakpoints), read and access watchpoints of any size,
+single and range stepping, CPU and FPU registers, memory access and
+Ctrl-C.  Read and access watchpoints trigger on CPU data accesses
+(not on instruction fetches or DMA), and stop after the accessing
+instruction.  With an enabled 68040/68060 data cache, accesses
+served from the cache are not seen and cache line fills can trigger
+them for neighbouring addresses.  While gdb is attached, bus error, address error,
 illegal instruction, division by zero, TRAPV and privilege violation
 exceptions are reported to gdb (in addition to the exceptions enabled
 with "--debug-except").  Memory accesses use physical addresses, MMU

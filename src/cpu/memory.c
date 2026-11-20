@@ -125,6 +125,11 @@ static bool last_address_space_24;
 
 addrbank *mem_banks[MEMORY_BANKS];
 
+/* Hatari: debugger watch on CPU data accesses, see memory.h */
+dbgwatch_func_t dbgwatch_func;
+uaecptr dbgwatch_start, dbgwatch_end;
+int dbgwatch_suspend;
+
 /* This has two functions. It either holds a host address that, when added
 to the 68k address, gives the host address corresponding to that 68k
 address (in which case the value in this array is even), OR it holds the
@@ -2047,6 +2052,7 @@ uae_u32 memory_get_wordi(uaecptr addr)
 uae_u32 memory_get_long(uaecptr addr)
 {
 	addrbank *ab = &get_mem_bank(addr);
+	dbgwatch_access(addr, 4, false);
 	if (!ab->baseaddr_direct_r) {
 		return call_mem_get_func(ab->lget, addr);
 	} else {
@@ -2060,6 +2066,7 @@ uae_u32 memory_get_long(uaecptr addr)
 uae_u32 memory_get_word(uaecptr addr)
 {
 	addrbank *ab = &get_mem_bank(addr);
+	dbgwatch_access(addr, 2, false);
 	if (!ab->baseaddr_direct_r) {
 		return call_mem_get_func(ab->wget, addr);
 	} else {
@@ -2073,6 +2080,7 @@ uae_u32 memory_get_word(uaecptr addr)
 uae_u32 memory_get_byte(uaecptr addr)
 {
 	addrbank *ab = &get_mem_bank(addr);
+	dbgwatch_access(addr, 1, false);
 	if (!ab->baseaddr_direct_r) {
 		return call_mem_get_func(ab->bget, addr);
 	} else {
@@ -2087,6 +2095,7 @@ uae_u32 memory_get_byte(uaecptr addr)
 void memory_put_long(uaecptr addr, uae_u32 v)
 {
 	addrbank *ab = &get_mem_bank(addr);
+	dbgwatch_access(addr, 4, true);
 	if (!ab->baseaddr_direct_w) {
 		call_mem_put_func(ab->lput, addr, v);
 	} else {
@@ -2100,6 +2109,7 @@ void memory_put_long(uaecptr addr, uae_u32 v)
 void memory_put_word(uaecptr addr, uae_u32 v)
 {
 	addrbank *ab = &get_mem_bank(addr);
+	dbgwatch_access(addr, 2, true);
 	if (!ab->baseaddr_direct_w) {
 		call_mem_put_func(ab->wput, addr, v);
 	} else {
@@ -2113,6 +2123,7 @@ void memory_put_word(uaecptr addr, uae_u32 v)
 void memory_put_byte(uaecptr addr, uae_u32 v)
 {
 	addrbank *ab = &get_mem_bank(addr);
+	dbgwatch_access(addr, 1, true);
 	if (!ab->baseaddr_direct_w) {
 		call_mem_put_func(ab->bput, addr, v);
 	} else {

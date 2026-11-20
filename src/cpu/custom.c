@@ -116,7 +116,11 @@ uae_u32 wait_cpu_cycle_read (uaecptr addr, int mode)
 		v = vd = get_wordi(addr);
 		break;
 		case 0:
+		/* Hatari: report the byte access to the debugger, not the bus word */
+		dbgwatch_suspend++;
 		v = vd = get_word(addr & ~1);
+		dbgwatch_suspend--;
+		dbgwatch_access(addr, 1, false);
 		v >>= (addr & 1) ? 0 : 8;
 		break;
 	}

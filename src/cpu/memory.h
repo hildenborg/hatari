@@ -556,6 +556,24 @@ uae_u32 memory_get_byte(uaecptr);
 uae_u32 memory_get_longi(uaecptr);
 uae_u32 memory_get_wordi(uaecptr);
 
+/* Hatari: watch on CPU data accesses, used by the GDB server for read
+ * and access watchpoints.  dbgwatch_func is NULL when nothing is watched.
+ * Bus accesses that are not the CPU operand access itself (DMA, cache
+ * line fills, byte reads done as word reads) increase dbgwatch_suspend
+ * and report the real access with dbgwatch_access() instead.
+ */
+typedef void (*dbgwatch_func_t)(uaecptr addr, int size, bool write);
+extern dbgwatch_func_t dbgwatch_func;
+extern uaecptr dbgwatch_start, dbgwatch_end;
+extern int dbgwatch_suspend;
+
+STATIC_INLINE void dbgwatch_access(uaecptr addr, int size, bool write)
+{
+	if (dbgwatch_func && !dbgwatch_suspend
+	    && addr < dbgwatch_end && addr + size > dbgwatch_start)
+		dbgwatch_func(addr, size, write);
+}
+
 STATIC_INLINE uae_u32 get_long(uaecptr addr)
 {
 	return memory_get_long(addr);
