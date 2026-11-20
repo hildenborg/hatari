@@ -29,12 +29,24 @@
 */
 const char GdbServer_fileid[] = "Hatari gdbserver.c";
 
+#ifdef _WIN32
+/* Winsock must come before windows.h, and WSAPoll() needs Vista or later */
+# ifndef _WIN32_WINNT
+#  define _WIN32_WINNT 0x0600
+# endif
+# include <winsock2.h>
+# include <ws2tcpip.h>
+#endif
+
 #include "main.h"
 #include "gdbserver.h"
 
 #if HAVE_GDBSERVER
 
 #include <sys/types.h>
+#ifdef _WIN32
+#include <io.h>
+#else
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
@@ -42,8 +54,8 @@ const char GdbServer_fileid[] = "Hatari gdbserver.c";
 #include <poll.h>
 #include <unistd.h>
 #include <fcntl.h>
+#endif
 #include <errno.h>
-#include <signal.h>
 #include <ctype.h>
 
 #include "configuration.h"
@@ -51,6 +63,7 @@ const char GdbServer_fileid[] = "Hatari gdbserver.c";
 #include "debugcpu.h"
 #include "debugInfo.h"
 #include "debug_priv.h"
+#include "file.h"
 #include "log.h"
 #include "m68000.h"
 #include "screen.h"
@@ -61,6 +74,58 @@ const char GdbServer_fileid[] = "Hatari gdbserver.c";
 
 #ifndef MSG_NOSIGNAL
 #define MSG_NOSIGNAL 0
+#endif
+
+/* Socket API differences between Winsock and POSIX */
+#ifdef _WIN32
+typedef SOCKET sock_t;
+#define SOCK_NONE	INVALID_SOCKET
+#define SockClose(fd)	closesocket(fd)
+#define SockPoll(pfd, n, timeout)	WSAPoll(pfd, n, timeout)
+#define SockError()	WSAGetLastError()
+#define SockInterrupted(err)	((err) == WSAEINTR)
+#define SockWouldBlock(err)	((err) == WSAEWOULDBLOCK)
+#else
+typedef int sock_t;
+#define SOCK_NONE	(-1)
+#define SockClose(fd)	close(fd)
+#define SockPoll(pfd, n, timeout)	poll(pfd, n, timeout)
+#define SockError()	errno
+#define SockInterrupted(err)	((err) == EINTR)
+#define SockWouldBlock(err)	((err) == EAGAIN || (err) == EWOULDBLOCK)
+#endif
+
+#ifdef _WIN32
+static bool wsaStarted;
+
+/**
+ * Initialize Winsock (once). Return false on failure.
+ */
+static bool SockInit(void)
+{
+	WSADATA wsaData;
+
+	if (wsaStarted)
+		return true;
+	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
+		return false;
+	wsaStarted = true;
+	return true;
+}
+
+/**
+ * Release Winsock, if it was initialized.
+ */
+static void SockExit(void)
+{
+	if (wsaStarted) {
+		WSACleanup();
+		wsaStarted = false;
+	}
+}
+#else
+#define SockInit()	true
+#define SockExit()
 #endif
 
 /* Max packet size accepted from gdb (advertised as hex in qSupported) */
@@ -120,8 +185,8 @@ typedef struct {
 } prog_info_t;
 
 /* --- connection --- */
-static int listenFd = -1;
-static int clientFd = -1;
+static sock_t listenFd = SOCK_NONE;
+static sock_t clientFd = SOCK_NONE;
 static char listenAddr[160];
 
 /* --- protocol state --- */
@@ -322,13 +387,14 @@ static void CloseClient(void);
 static bool WriteAll(const uint8_t *data, size_t len)
 {
 	while (len > 0) {
-		ssize_t n = send(clientFd, data, len, MSG_NOSIGNAL);
+		long n = send(clientFd, (const void *)data, len, MSG_NOSIGNAL);
 		if (n < 0) {
-			if (errno == EINTR)
+			int err = SockError();
+			if (SockInterrupted(err))
 				continue;
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			if (SockWouldBlock(err)) {
 				struct pollfd pfd = { clientFd, POLLOUT, 0 };
-				poll(&pfd, 1, 1000);
+				SockPoll(&pfd, 1, 1000);
 				continue;
 			}
 			return false;
@@ -347,7 +413,7 @@ static void SendPacket(void)
 	uint8_t sum = 0;
 	size_t i, n = 0;
 
-	if (clientFd < 0)
+	if (clientFd == SOCK_NONE)
 		return;
 
 	lastSent = realloc(lastSent, outLen * 2 + 8);
@@ -383,18 +449,18 @@ static void SendPacket(void)
 static int ReadInput(int timeout)
 {
 	struct pollfd pfd;
-	ssize_t n;
+	long n;
 	int ret;
 
-	if (clientFd < 0)
+	if (clientFd == SOCK_NONE)
 		return -1;
 
 	pfd.fd = clientFd;
 	pfd.events = POLLIN;
 	pfd.revents = 0;
 	do {
-		ret = poll(&pfd, 1, timeout);
-	} while (ret < 0 && errno == EINTR);
+		ret = SockPoll(&pfd, 1, timeout);
+	} while (ret < 0 && SockInterrupted(SockError()));
 	if (ret <= 0)
 		return 0;
 
@@ -407,10 +473,10 @@ static int ReadInput(int timeout)
 		}
 	}
 	do {
-		n = recv(clientFd, inBuf + inLen, inSize - inLen, 0);
-	} while (n < 0 && errno == EINTR);
+		n = recv(clientFd, (void *)(inBuf + inLen), inSize - inLen, 0);
+	} while (n < 0 && SockInterrupted(SockError()));
 	if (n <= 0) {
-		if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+		if (n < 0 && SockWouldBlock(SockError()))
 			return 0;
 		return -1;
 	}
@@ -858,10 +924,10 @@ static void Release(void)
 
 static void CloseClient(void)
 {
-	if (clientFd < 0)
+	if (clientFd == SOCK_NONE)
 		return;
-	close(clientFd);
-	clientFd = -1;
+	SockClose(clientFd);
+	clientFd = SOCK_NONE;
 	Release();
 	inLen = 0;
 	noAckMode = false;
@@ -874,19 +940,20 @@ static void CloseClient(void)
 static bool AcceptClient(int timeout)
 {
 	struct pollfd pfd;
-	int fd, one = 1;
+	sock_t fd;
+	int one = 1;
 
 	pfd.fd = listenFd;
 	pfd.events = POLLIN;
 	pfd.revents = 0;
-	if (poll(&pfd, 1, timeout) <= 0)
+	if (SockPoll(&pfd, 1, timeout) <= 0)
 		return false;
 	fd = accept(listenFd, NULL, NULL);
-	if (fd < 0)
+	if (fd == SOCK_NONE)
 		return false;
-	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+	setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const void *)&one, sizeof(one));
 #ifdef SO_NOSIGPIPE
-	setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+	setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, (const void *)&one, sizeof(one));
 #endif
 	clientFd = fd;
 	inLen = 0;
@@ -1434,8 +1501,8 @@ static void BuildElf(void)
 static void CmdMonitor(const char *hexcmd)
 {
 	char cmd[MAX_DEBUG_CMD_LEN];
-	int len, save1, save2;
-	char buf[512];
+	int len, outFd, errFd, save1, save2;
+	char buf[512], *tmpName;
 	FILE *tmp;
 	size_t n;
 
@@ -1449,18 +1516,28 @@ static void CmdMonitor(const char *hexcmd)
 		strcpy(cmd, "help");
 	}
 
-	tmp = tmpfile();
+	tmp = File_OpenTempFile(&tmpName);
 	if (!tmp) {
 		OutError(1);
 		return;
 	}
+#ifdef _WIN32
+	/* a GUI program without console has no file descriptors
+	 * behind stdout & stderr, so give them one to redirect */
+	if (fileno(stdout) < 0)
+		freopen("NUL", "w", stdout);
+	if (fileno(stderr) < 0)
+		freopen("NUL", "w", stderr);
+#endif
 	/* capture both stdout & stderr (and debugOutput when it is one of them) */
 	fflush(stdout);
 	fflush(stderr);
-	save1 = dup(STDOUT_FILENO);
-	save2 = dup(STDERR_FILENO);
-	dup2(fileno(tmp), STDOUT_FILENO);
-	dup2(fileno(tmp), STDERR_FILENO);
+	outFd = fileno(stdout);
+	errFd = fileno(stderr);
+	save1 = dup(outFd);
+	save2 = dup(errFd);
+	dup2(fileno(tmp), outFd);
+	dup2(fileno(tmp), errFd);
 
 	DebugUI_ParseLine(cmd);
 
@@ -1468,10 +1545,14 @@ static void CmdMonitor(const char *hexcmd)
 	fflush(stderr);
 	if (debugOutput)
 		fflush(debugOutput);
-	dup2(save1, STDOUT_FILENO);
-	dup2(save2, STDERR_FILENO);
-	close(save1);
-	close(save2);
+	if (save1 >= 0) {
+		dup2(save1, outFd);
+		close(save1);
+	}
+	if (save2 >= 0) {
+		dup2(save2, errFd);
+		close(save2);
+	}
 
 	rewind(tmp);
 	while ((n = fread(buf, 1, sizeof(buf), tmp)) > 0) {
@@ -1480,6 +1561,8 @@ static void CmdMonitor(const char *hexcmd)
 		SendPacket();
 	}
 	fclose(tmp);
+	if (tmpName)
+		remove(tmpName);
 	OutStr("OK");
 }
 
@@ -1903,7 +1986,7 @@ static void StopLoop(int signal, bool reply)
 		OutStopReply();
 		SendPacket();
 	}
-	while (clientFd >= 0) {
+	while (clientFd != SOCK_NONE) {
 		int ret = GetPacket();
 		if (ret < 0) {
 			CloseClient();
@@ -1947,7 +2030,7 @@ bool GdbServer_DebugUI(debug_reason_t reason)
 	uint32_t pc;
 	int signal;
 
-	if (clientFd < 0 || !attached || stopped)
+	if (clientFd == SOCK_NONE || !attached || stopped)
 		return false;
 
 	pc = M68000_GetPC();
@@ -2027,10 +2110,10 @@ void GdbServer_NoteException(int nr)
 
 void GdbServer_Poll(void)
 {
-	if (listenFd < 0 || stopped)
+	if (listenFd == SOCK_NONE || stopped)
 		return;
 
-	if (clientFd < 0) {
+	if (clientFd == SOCK_NONE) {
 		if (!AcceptClient(0))
 			return;
 		/* stop emulation for gdb, gdb asks the stop reason */
@@ -2062,7 +2145,7 @@ void GdbServer_Poll(void)
 			return;
 		}
 	}
-	while (clientFd >= 0 && !attached && !stopped && ParsePacket()) {
+	while (clientFd != SOCK_NONE && !attached && !stopped && ParsePacket()) {
 		gdb_action_t act = HandlePacket();
 		if (act == ACT_DETACH) {
 			CloseClient();
@@ -2074,7 +2157,7 @@ void GdbServer_Poll(void)
 
 bool GdbServer_IsListening(void)
 {
-	return listenFd >= 0;
+	return listenFd != SOCK_NONE;
 }
 
 
@@ -2089,9 +2172,9 @@ void GdbServer_ProgramStart(const char *path, uint32_t basepage)
 {
 	char expr[64];
 
-	if (listenFd < 0 || stopped)
+	if (listenFd == SOCK_NONE || stopped)
 		return;
-	if (clientFd >= 0) {
+	if (clientFd != SOCK_NONE) {
 		if (!waitForProgram || !ProgramNameMatches(path, waitProgramName))
 			return;
 	} else if (!waitAtStart) {
@@ -2109,7 +2192,7 @@ void GdbServer_ProgramStart(const char *path, uint32_t basepage)
 	}
 	startBreak = prog.text;
 
-	if (clientFd < 0) {
+	if (clientFd == SOCK_NONE) {
 		fprintf(stderr, "GDB server: program '%s' started, waiting for gdb to connect to %s...\n",
 			path, listenAddr);
 		if (!AcceptClient(-1)) {
@@ -2134,7 +2217,7 @@ void GdbServer_ProgramExit(uint32_t basepage, int exitcode)
 	if (!prog.valid || basepage != prog.basepage)
 		return;
 	prog.valid = false;
-	if (clientFd < 0 || !attached)
+	if (clientFd == SOCK_NONE || !attached)
 		return;
 
 	fprintf(stderr, "GDB server: program exited with code %d.\n", exitcode);
@@ -2159,7 +2242,10 @@ const char *GdbServer_Start(const char *address)
 	struct addrinfo hints, *res, *ai;
 	char host[64], *colon;
 	const char *port;
-	int fd = -1, one = 1;
+	sock_t fd = SOCK_NONE;
+#ifndef _WIN32
+	int one = 1;
+#endif
 
 	if (strlen(address) >= sizeof(host))
 		return "too long GDB server address";
@@ -2177,6 +2263,8 @@ const char *GdbServer_Start(const char *address)
 	GdbServer_Stop();
 	if (strcmp(port, "0") == 0)
 		return NULL;	/* disabled */
+	if (!SockInit())
+		return "can't initialize sockets";
 
 	memset(&hints, 0, sizeof(hints));
 	hints.ai_family = AF_UNSPEC;
@@ -2188,19 +2276,26 @@ const char *GdbServer_Start(const char *address)
 
 	for (ai = res; ai; ai = ai->ai_next) {
 		fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-		if (fd < 0)
+		if (fd == SOCK_NONE)
 			continue;
-		setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+#ifndef _WIN32
+		/* on Windows, SO_REUSEADDR would let others steal the port */
+		setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, (const void *)&one, sizeof(one));
+#endif
 		if (bind(fd, ai->ai_addr, ai->ai_addrlen) == 0 && listen(fd, 1) == 0)
 			break;
-		close(fd);
-		fd = -1;
+		SockClose(fd);
+		fd = SOCK_NONE;
 	}
 	freeaddrinfo(res);
-	if (fd < 0)
+	if (fd == SOCK_NONE)
 		return "can't listen on GDB server port";
 
+#ifdef _WIN32
+	SetHandleInformation((HANDLE)fd, HANDLE_FLAG_INHERIT, 0);
+#else
 	fcntl(fd, F_SETFD, FD_CLOEXEC);
+#endif
 	listenFd = fd;
 	snprintf(listenAddr, sizeof(listenAddr), "%s:%s",
 		 colon ? (host[0] ? host : "*") : "localhost", port);
@@ -2210,7 +2305,7 @@ const char *GdbServer_Start(const char *address)
 
 void GdbServer_Stop(void)
 {
-	if (clientFd >= 0) {
+	if (clientFd != SOCK_NONE) {
 		if (attached && stopReplyPending) {
 			/* tell gdb that the "process" is gone */
 			OutClear();
@@ -2219,9 +2314,9 @@ void GdbServer_Stop(void)
 		}
 		CloseClient();
 	}
-	if (listenFd >= 0) {
-		close(listenFd);
-		listenFd = -1;
+	if (listenFd != SOCK_NONE) {
+		SockClose(listenFd);
+		listenFd = SOCK_NONE;
 		fprintf(stderr, "GDB server: stopped.\n");
 	}
 }
@@ -2233,12 +2328,12 @@ void GdbServer_SetWaitAtProgramStart(bool wait)
 
 void GdbServer_ShowStatus(FILE *fp)
 {
-	if (listenFd < 0) {
+	if (listenFd == SOCK_NONE) {
 		fputs("GDB server is not running.\n", fp);
 		return;
 	}
 	fprintf(fp, "GDB server listening on %s, %s.\n", listenAddr,
-		clientFd >= 0 ? "gdb connected" : "no connection");
+		clientFd != SOCK_NONE ? "gdb connected" : "no connection");
 	fprintf(fp, "Wait for gdb at program start: %s.\n", waitAtStart ? "on" : "off");
 	fprintf(fp, "gdb breakpoints/watchpoints: %d.\n", bpCount);
 }
@@ -2246,6 +2341,7 @@ void GdbServer_ShowStatus(FILE *fp)
 void GdbServer_UnInit(void)
 {
 	GdbServer_Stop();
+	SockExit();
 	free(inBuf);
 	free(outBuf);
 	free(lastSent);

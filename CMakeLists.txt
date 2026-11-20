@@ -243,7 +243,11 @@ check_include_files(sys/times.h HAVE_SYS_TIMES_H)
 check_include_files(utime.h HAVE_UTIME_H)
 check_include_files(sys/utime.h HAVE_SYS_UTIME_H)
 check_include_files("sys/socket.h;sys/un.h" HAVE_UNIX_DOMAIN_SOCKETS)
-check_include_files("sys/socket.h;netinet/in.h;netinet/tcp.h;netdb.h;poll.h" HAVE_GDBSERVER)
+if(WIN32)
+	check_include_files("winsock2.h;ws2tcpip.h" HAVE_GDBSERVER)
+else()
+	check_include_files("sys/socket.h;netinet/in.h;netinet/tcp.h;netdb.h;poll.h" HAVE_GDBSERVER)
+endif()
 
 # #############################
 # Check for optional functions:
