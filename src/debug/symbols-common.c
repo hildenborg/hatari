@@ -59,6 +59,11 @@ typedef struct {
 #define SYMBOL_FORMAT_MINT 0x4D694E54	/* "MiNT" */
 #define SYMBOL_FORMAT_ELF  0x454c4600	/* "ELF" */
 #define SYMBOL_FORMAT_DRI  0x0
+/* Set by m68k-atari-elf toolchain, its programs never have a symbol table */
+#define SYMBOL_FORMAT_ATARI_ELF 0x68e1f001
+
+/* Offset of the symbol table format field in program header */
+#define PRG_HEADER_SYMFORMAT_OFFSET 18
 
 /* Magic identifying Atari programs */
 #define ATARI_PROGRAM_MAGIC 0x601A
@@ -1360,6 +1365,9 @@ static bool symbols_print_prg_info(uint32_t tabletype, uint32_t prgflags, uint16
 	case SYMBOL_FORMAT_DRI:
 		info = "TOS executable, DRI / GST symbol table";
 		break;
+	case SYMBOL_FORMAT_ATARI_ELF:
+		info = "m68k-atari-elf executable, no symbol table";
+		break;
 	default:
 		fprintf(stderr, "ERROR: unknown executable type 0x%x!\n", tabletype);
 		return false;
@@ -1608,6 +1616,11 @@ static symbol_list_t* symbols_load_binary(FILE *fp, const uint32_t *offsets,
 	}
 
 	if (!symbols_print_prg_info(tabletype, prgflags, relocflag)) {
+		free(headers);
+		return NULL;
+	}
+	if (tabletype == SYMBOL_FORMAT_ATARI_ELF) {
+		fprintf(stderr, "Symbols are in the ELF file this program was converted from.\n");
 		free(headers);
 		return NULL;
 	}

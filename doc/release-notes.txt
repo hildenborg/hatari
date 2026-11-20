@@ -126,6 +126,8 @@ Emulator improvements:
   - Symbol offsets for "symbols prg" are taken from program basepage
     (user given values are ignored)
   - *.sym files supported also with "symbols prg" command
+  - Recognize m68k-atari-elf toolchain programs (which never have
+    a symbol table) instead of reporting an unknown executable type
   - Best-effort support for using demangled C++ symbols for
     breakpoints and other debugger commands
 - Mac:

@@ -596,6 +596,10 @@ depend on which toolchain is used to build it:
 <dd>"-g" (can only be used at linking phase), <em>when VBCC
     configuration file uses "-bataritos" option for
     the linker</em></dd>
+<dt><em>m68k-atari-elf GCC</em>:</dt>
+<dd>Programs converted from ELF with "m68k-atari-elf-prg" never
+    have a symbol table.  Give symbols in a ".sym" file made from the
+    ELF file instead (see below), or debug with gdb using the ELF file.</dd>
 </dl>
 
 <p>Generated symbols can be viewed (and converted to debugger
@@ -624,6 +628,9 @@ given program started).</p>
     provided in a separate ".sym" file / download</li>
 <li>Addding missing (function) symbols, or removing (loop) symbols,
     to improve profiling results</li>
+<li>Programs made with m68k-atari-elf toolchain have no symbol table,
+    but their symbols can be given with e.g.
+    "m68k-atari-elf-nm --defined-only program.elf &gt; program.sym"</li>
 </ul>
 
 

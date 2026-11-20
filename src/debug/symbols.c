@@ -359,6 +359,21 @@ static const uint32_t *get_offsets(const uint32_t *in_offsets, uint32_t *out_off
 }
 
 /**
+ * Return true if given Atari program file is made with m68k-atari-elf
+ * toolchain.  Its symbols are only in the ELF file it was converted from.
+ */
+static bool symbols_prg_is_atari_elf(FILE *fp)
+{
+	uint32_t format;
+
+	if (fseek(fp, PRG_HEADER_SYMFORMAT_OFFSET, SEEK_SET) < 0 ||
+	    fread(&format, sizeof(format), 1, fp) != 1) {
+		return false;
+	}
+	return be_swap32(format) == SYMBOL_FORMAT_ATARI_ELF;
+}
+
+/**
  * Load symbols of given type and the symbol address addresses from
  * the given file and add given offsets to the addresses.
  * Offsets are optional for running binaries.
@@ -389,8 +404,16 @@ static symbol_list_t* Symbols_Load(const char *filename, const uint32_t *offsets
 		} else if (strcmp(last, filename) != 0) {
 			fprintf(stderr, "WARNING: given program doesn't match last program executed by GEMDOS HD emulation:\n\t%s\n", last);
 		}
-		fprintf(stderr, "Reading symbols from program '%s' symbol table...\n", filename);
 		fp = fopen(filename, "rb");
+		if (fp && symbols_prg_is_atari_elf(fp)) {
+			/* not an error, there just are no symbols */
+			fprintf(stderr, "Program '%s' is made with m68k-atari-elf toolchain and has no symbol table.\n"
+				"For debugger symbols, make '<program>.sym' file from its ELF file with 'nm --defined-only'.\n",
+				filename);
+			fclose(fp);
+			return NULL;
+		}
+		fprintf(stderr, "Reading symbols from program '%s' symbol table...\n", filename);
 		offsets = get_offsets(offsets, off_buffer, OFFSET_TYPE_PROGRAM);
 		list = symbols_load_binary(fp, offsets, update_sections, &opts);
 	} else {
