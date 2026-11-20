@@ -22,7 +22,7 @@ Atari ST/STE/TT/Falcon emulator. Coding rules are in `doc/coding.txt`: TABs for 
 
 ## GDB server (`src/debug/gdbserver.c`)
 
-The server implements gdb's remote serial protocol on a TCP port (`--gdbserver [host:]port`, `--gdbserver-wait <bool>`, debugger command `gdbserver`). It is modelled on the Atari-side gdbserver in `../m68k-atari-dev/gdbserver`. User documentation is the "Debugging with gdb" section of `doc/debugger.html`.
+The server implements gdb's remote serial protocol on a TCP port (`--gdbserver [host:]port`, `--gdbserver-wait <bool>`, debugger command `gdbserver`). It is modelled on the Atari-side gdbserver in `../m68k-atari-dev/gdbserver`. User documentation is the "Debugging with gdb" section of `doc/debugger.html`. How the server works is described in `doc/gdbserver.md`.
 
 - **Threading:** everything runs in the emulation thread, and there are no other threads. While gdb has the emulation stopped, `StopLoop()` blocks inside the `DebugUI` hook or in `GdbServer_Poll()`. `GdbServer_Poll()` is called from `src/sdl/gui_event.c` about once per VBL; it accepts connections and catches Ctrl-C (0x03) while emulation runs.
 - **States:**

@@ -1133,7 +1133,7 @@ static const dbgcommand_t uicommand[] =
 	  "\tlisten for gdb connections on it (localhost only, unless host\n"
 	  "\tis given, e.g. ':1234' for all interfaces). 'off' stops the\n"
 	  "\tserver. 'wait on' makes Hatari stop at the start of programs\n"
-	  "\tstarted from GEMDOS HD and wait for gdb when no gdb is connected.",
+	  "\tstarted from GEMDOS HD, and wait for gdb if it isn't connected yet.",
 	  false },
 	{ DebugUI_Help, DebugUI_MatchCommand,
 	  "help", "h",
